@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>weave-connector — Backend Design</title>
+<style>body{font-family:system-ui;max-width:900px;margin:2em auto;line-height:1.5}code{background:#f4f4f4;padding:2px 5px}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px;text-align:left}</style></head>
+<body>
+<h1>weave-connector — Backend (API) Design</h1>
+<p>Transport: MCP over stdio. Config: <code>config.toml</code> (path overridable via
+<code>WEAVE_CONNECTOR_CONFIG</code>). No HTTP surface. DATABASE_DESIGN: skipped — no data
+backend (state is in-memory sessions/connections only). PAGE_DESIGN: skipped — backend-only
+project (no UI).</p>
+
+<h2>Tools (API surface)</h2>
+<table>
+<tr><th>Tool</th><th>Args</th><th>Returns (key fields)</th></tr>
+<tr><td>ssh_list_profiles</td><td>—</td><td>profiles[public], default_profile</td></tr>
+<tr><td>ssh_connect</td><td>profile?</td><td>profile, host, port, sessions[]</td></tr>
+<tr><td>ssh_disconnect</td><td>profile?</td><td>disconnected</td></tr>
+<tr><td>ssh_shell_open</td><td>profile?, cwd?, env?, cols, rows, term</td><td>session_id, cursor, size</td></tr>
+<tr><td>ssh_shell_exec</td><td>session_id, command, timeout_ms, max_chars</td><td>completed, exit_code | timeout, output, cursor</td></tr>
+<tr><td>ssh_shell_await</td><td>session_id, timeout_ms, max_chars</td><td>completed, exit_code, output, cursor</td></tr>
+<tr><td>ssh_shell_write</td><td>session_id, data | data_base64</td><td>written_bytes</td></tr>
+<tr><td>ssh_shell_read</td><td>session_id, cursor, wait_ms, max_bytes</td><td>output, cursor, data_loss, alive, pending_exec</td></tr>
+<tr><td>ssh_shell_signal</td><td>session_id, signal</td><td>sent | error + known[]</td></tr>
+<tr><td>ssh_shell_resize</td><td>session_id, cols, rows</td><td>size</td></tr>
+<tr><td>ssh_shell_list</td><td>—</td><td>sessions[info]</td></tr>
+<tr><td>ssh_shell_close</td><td>session_id</td><td>closed</td></tr>
+<tr><td>ssh_status</td><td>—</td><td>connections, sessions, profiles</td></tr>
+</table>
+
+<h2>Daemon · key vault · transcripts</h2>
+<ul>
+<li>Resident daemon owns connections/sessions (unix socket JSON-line RPC, token 0600);
+the MCP server is a thin client with auto-spawn — sessions survive client restarts.
+Flat Manager method surface is the single local/remote seam. WEAVE_CONNECTOR_DAEMON=off → in-process.</li>
+<li>key_ref = "vault:NAME" holds a PEM private key (enroll kind="key", source="file:&lt;path&gt;", confirm-gated).</li>
+<li>record=true on ssh_shell_open keeps a scrubbed transcript (ssh_shell_transcript).</li>
+<li>State dir: $WEAVE_CONNECTOR_STATE_DIR or ~/.weave-connector (0700) — audit.jsonl + sessions.json.</li>
+</ul>
+
+<h2>Port forwarding · ProxyJump · Named sessions · Enroll</h2>
+<ul>
+<li><code>ssh_forward_open/list/close</code> — local (-L) forwards over the persistent connection; separate tools for permission gating; <code>local_port=0</code> picks a free port.</li>
+<li>Profile <code>jump = "&lt;profile&gt;"</code> — ProxyJump via that profile's connection (credential layer reused; fail-closed on unknown).</li>
+<li><code>ssh_shell_open(name=...)</code> — idempotent named sessions; <code>sessions.json</code> holds recovery hints (env KEYS only).</li>
+<li><code>ssh_credential_enroll(profile, source)</code> — vault enrollment (local 0600 file) via native hidden dialog or <code>env:WEAVE_ENROLL_*</code>; value never enters tool args/LLM.</li>
+<li>Tool annotations: read-only tools <code>readOnlyHint</code>, destructive tools <code>destructiveHint</code>.</li>
+</ul>
+
+<h2>Credential references (password_ref) — resolve-below-the-model</h2>
+<ul>
+<li><code>password_ref = "env:VAR"</code> or <code>"keychain:service/account"</code> on a profile;
+resolved ONLY inside the server process at connect (fail-closed). Plaintext never enters tool arguments or transcripts; it is scrubbed from tool output
+(best-effort, see above). Plaintext <code>password=</code> in config.toml still works but is
+discouraged — prefer <code>password_ref</code>.</li>
+<li>Resolved/used password values (≥4 chars) are scrubbed from returned output — raw, hex, base64, base64url forms, PTY line-wrap tolerant, window-split fragments trimmed (best-effort; transformed values like hashes are out of scope).</li>
+<li>Append-only <code>audit.jsonl</code> (cwd) logs each resolution: ref, profile, host, ok — never values.</li>
+<li>Config containing credentials with group/world-readable mode produces a warning in <code>ssh_status.warnings</code>.</li>
+<li>Boundary: protects model context/logs; does not defend a local same-user process.</li>
+</ul>
+
+<h2>Invariants</h2>
+<ul>
+<li>exit_code is produced only by the sentinel marker <code>__WC_EXIT_&lt;n&gt;__</code>; markers are stripped from returned output.</li>
+<li>cursors are absolute, monotonically increasing per session; buffer cap per <code>max_buffer_bytes</code>.</li>
+<li>≤1 pending exec per session; ≤32 sessions total; signals map to control bytes (interrupt=\x03, eof=\x04, suspend=\x1a, quit=\x1c) plus terminate/kill.</li>
+<li>secrets never leave config.toml: tool outputs carry public profile fields only.</li>
+</ul>
+
+<h2>Error model</h2>
+<p>Tool-level failures return <code>{error: message}</code> payloads (never throw across
+stdio); unknown session/profile ids list the valid ids; dead connections reconnect on next
+<code>ssh_connect</code>.</p>
+
+<h2>Testing</h2>
+<p>tests/test_e2e.py: real MCP stdio client → server subprocess → real asyncssh SSH server
+(127.0.0.1:10022) → real PTY + bash (setsid+TIOCSCTTY). 30 checks mapped to
+tests/acceptance.md; evidence in tests/evidence/.</p>
+</body></html>

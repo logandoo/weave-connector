@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>weave-connector — Flow Design</title>
+<style>body{font-family:system-ui;max-width:900px;margin:2em auto;line-height:1.5}code,pre{background:#f4f4f4;padding:2px 5px}pre{padding:1em;overflow:auto}h2{border-bottom:1px solid #ccc}</style></head>
+<body>
+<h1>weave-connector — Flow Design</h1>
+<p>MCP server (stdio) giving agents persistent interactive SSH shell sessions. One SSH
+channel per host profile; N PTY shell sessions per channel; credentials only in
+<code>config.toml</code>, never in tool arguments (no sshpass anywhere).</p>
+
+<h2>Actors &amp; Layers</h2>
+<pre>MCP host (opencode agent)
+  │ stdio JSON-RPC
+  ▼
+weave_connector.server  (FastMCP tools: ssh_*)
+  ▼
+weave_connector.session.Manager ── connections: profile → SSHClientConnection
+  └── ShellSession ×N ── SSHClientProcess (PTY shell) + ring buffer + cursors
+  ▼ SSH protocol (asyncssh)
+remote sshd → bash on PTY</pre>
+
+<h2>Primary flows</h2>
+<h3>1. Open &amp; drive a persistent shell</h3>
+<pre>ssh_list_profiles → ssh_shell_open(profile, cwd?, env?)
+  → bootstrap exec (cd/exports + readiness marker) → session_id
+ssh_shell_exec(session_id, command, timeout_ms)
+  → writes:  command; printf '\n__WC_EXIT_%s__\n' "$?"
+  → pump task appends all PTY output to ring buffer (absolute cursor offsets)
+  → waits on condition var for marker regex → {exit_code, output, cursor}
+  → timeout → {completed:false, cursor} and marker stays pending
+      ├─ ssh_shell_read(cursor, wait_ms)   incremental polling
+      ├─ ssh_shell_await(session_id)       wait for pending marker → exit_code
+      └─ ssh_shell_signal(interrupt)       Ctrl-C; marker survives (same-line form)</pre>
+<h3>2. Interactive / TUI</h3>
+<pre>ssh_shell_write(session_id, data | data_base64)  raw bytes, no marker
+ssh_shell_read(session_id, cursor, wait_ms)      screen text, ANSI-stripped
+ssh_shell_resize(session_id, cols, rows)         SIGWINCH via change_terminal_size</pre>
+<h3>3. Teardown</h3>
+<pre>ssh_shell_close(session_id)   session only
+ssh_disconnect(profile)       all sessions + the SSH channel
+idle reaper                   closes sessions idle &gt; idle_timeout_sec</pre>
+
+<h2>Credential flow (password_ref)</h2>
+<pre>config.toml [profiles.x] password_ref = "keychain:svc/acct" | "env:VAR"
+  → ssh_connect/open_shell → SecretResolver.resolve (in-process, fail-closed)
+  → register_secret (scrub table) → asyncssh.connect(password=...)
+  → audit.jsonl line (ref+profile+host+ok, never value)
+  → all shell output passes scrub_text() before returning (best-effort: raw/hex/b64/b64url,
+     PTY-wrap tolerant; fragments at window edges trimmed; transformed values out of scope)</pre>
+
+<h2>Key design decisions</h2>
+<ul>
+<li><b>Marker-based completion:</b> exit codes without extra channels; single-line
+<code>; printf MARKER $?</code> survives Ctrl-C (tty input-queue flush would eat a queued line).</li>
+<li><b>Cursor stream:</b> absolute byte offsets over a capped ring buffer; data_loss flagged
+when the cursor fell behind the retained window.</li>
+<li><b>One pending exec per session</b> — shell stdin is single; concurrent execs are rejected with a clear error.</li>
+<li><b>Security:</b> profiles in config.toml (chmod 600); list/status tools return public fields only;
+accept_unknown_host=true reserved for lab targets.</li>
+</ul>
+</body></html>

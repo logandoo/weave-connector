@@ -1,0 +1,15 @@
+.venv/
+.pid
+logs/
+__pycache__/
+*.egg-info/
+tests/evidence/test_host_key
+config.local.toml
+audit.jsonl
+.vibeweaver/
+sessions.json
+tests/evidence/keyvault.*
+tests/evidence/daemon-state/
+tests/evidence/state/
+
+tests/evidence/

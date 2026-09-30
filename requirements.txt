@@ -1,0 +1,4 @@
+mcp>=1.12,<2
+asyncssh>=2.14
+pytest>=8
+keyring>=24

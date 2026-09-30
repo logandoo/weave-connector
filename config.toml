@@ -1,0 +1,26 @@
+# weave-connector configuration.
+# Credentials: use the local vault (default, zero keychain prompts) or env vars.
+#   ssh_credential_enroll stores values into ~/.weave-connector/secrets.json (0600)
+#   and returns "vault:<name>" — put that in password_ref / key_ref.
+# This file is read with hot-reload (content + permission fingerprint).
+
+[server]
+# profile used when a tool call omits the profile name
+default_profile = ""
+# per-shell-session output ring buffer cap
+max_buffer_bytes = 1048576
+# sessions idle longer than this are closed by the reaper (0 = never)
+idle_timeout_sec = 1800
+
+# Example profile (example values only — real profiles are yours to add):
+# [profiles.example-host]
+# host = "203.0.113.10"
+# port = 22
+# username = "deploy"
+# password_ref = "vault:example-host"   # preferred: local vault file, zero prompts
+# #   alternatives: password_ref = "env:MY_VAR"  |  key = "~/.ssh/id_ed25519"
+# #   keychain:service/account is an explicit opt-in (may prompt for keychain access)
+# key_ref = "vault:example-host-key"    # optional: private key (PEM) stored in vault
+# jump = "bastion"                      # optional: tunnel through another profile (ProxyJump)
+# host_fingerprint = "SHA256:..."      # optional: pin host key (verified pre-auth, fail-closed)
+# accept_unknown_host = false           # true = skip known_hosts verification (lab only)

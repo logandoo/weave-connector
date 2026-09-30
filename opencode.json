@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "weave-connector": {
+      "type": "local",
+      "command": ["./.venv/bin/python", "-m", "weave_connector.server"],
+      "environment": {
+        "WEAVE_CONNECTOR_CONFIG": "./config.toml"
+      },
+      "enabled": true
+    }
+  }
+}
