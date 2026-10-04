@@ -55,14 +55,14 @@ flowchart LR
         SAFE{"safe() error scrub<br/>uniform {error} shape"}
     end
 
-    subgraph Daemon[Resident daemon · daemon.sock<br/>(owns connections; survives client restarts)]
+    subgraph Daemon["Resident daemon · daemon.sock<br/>(owns connections; survives client restarts)"]
         DIS{dispatch<br/>allowlisted methods<br/>token auth · scrubbed errors}
     end
 
     subgraph Core[Manager]
         CM[ConnectionManager<br/>per-profile SSHClientConnection<br/>keepalives · identity-keyed reuse<br/>jump chains · hot-reload fingerprint]
         SESS[ShellSession ×N<br/>PTY process · ring buffer + cursors<br/>nonce marker protocol · transcript<br/>idle reaper]
-        SFTP[SFTP client (per op)]
+        SFTP["SFTP client (per op)"]
         FWD[Port-forward registry<br/>-L listeners · cap/loopback guard]
     end
 
@@ -106,7 +106,7 @@ sequenceDiagram
     Note over A,S: long-running command
     A->>T: ssh_shell_exec(sid, "deploy", timeout_ms=800)
     T->>D: risk-tier gate (confirm? · audit)
-    D->>S: write: deploy; printf \n__WC_EXIT_<nonce>_%s__\n "$?"
+    D->>S: write: deploy #59; printf \n__WC_EXIT_<nonce>_%s__\n "$?"
     S-->>D: stream → ring buffer (cursor offsets)
     D-->>A: {timeout:true, cursor}   % still running
     A->>T: ssh_shell_read(sid, cursor, wait_ms)   % incremental, scrubbed
